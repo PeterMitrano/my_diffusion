@@ -76,10 +76,14 @@ class Up(nn.Module):
 
 class SelfAttention(nn.Module):
 
-    def __init__(self, channels, size):
+    def __init__(self, shape):
+        """
+
+        :param shape: a 3-tuple
+        """
         super().__init__()
-        self.channels = channels
-        self.size = size
+        self.shape = shape
+        channels = shape[0]
         self.mha = nn.MultiheadAttention(channels, 4, batch_first=True)
         self.ln = nn.LayerNorm([channels])
         self.ff_self = nn.Sequential(
@@ -90,13 +94,13 @@ class SelfAttention(nn.Module):
         )
 
     def forward(self, x):
-        # NOTE: assumes square image!
-        x = x.reshape(-1, self.channels, self.size * self.size).swapaxes(1, 2)
+        # Move the channel dimension to the end, and flatten the spatial dimensions
+        x = x.reshape(-1, self.shape[0], self.shape[1] * self.shape[2]).swapaxes(1, 2)
         x_ln = self.ln(x)
         attention_value, _ = self.mha(x_ln, x_ln, x_ln)
         attention_value = attention_value * x
         attention_value = self.ff_self(attention_value) + attention_value
-        return attention_value.swapaxes(2, 1).reshape(-1, self.channels, self.size, self.size)
+        return attention_value.swapaxes(2, 1).reshape(-1, self.shape[0], self.shape[1], self.shape[2])
 
 
 class UNet(nn.Module):
@@ -110,22 +114,22 @@ class UNet(nn.Module):
 
         self.inc = DoubleConv(c_in, 64)
         self.down1 = Down(64, 128)
-        self.sa1 = SelfAttention(128, 32)
+        self.sa1 = SelfAttention((128, 32, 32))
         self.down2 = Down(128, 256)
-        self.sa2 = SelfAttention(256, 16)
+        self.sa2 = SelfAttention((256, 16, 16))
         self.down3 = Down(256, 256)
-        self.sa3 = SelfAttention(256, 8)
+        self.sa3 = SelfAttention((256, 8, 8))
 
         self.bot1 = DoubleConv(256, 512)
         self.bot2 = DoubleConv(512, 512)
         self.bot3 = DoubleConv(512, 256)
 
         self.up1 = Up(512, 128)
-        self.sa4 = SelfAttention(128, 16)
+        self.sa4 = SelfAttention((128, 16, 16))
         self.up2 = Up(256, 64)
-        self.sa5 = SelfAttention(64, 32)
+        self.sa5 = SelfAttention((64, 32, 32))
         self.up3 = Up(128, 64)
-        self.sa6 = SelfAttention(64, 64)
+        self.sa6 = SelfAttention((64, 64, 64))
         self.outc = nn.Conv2d(64, c_out, kernel_size=1)
 
     def pos_encoding(self, t, channels):

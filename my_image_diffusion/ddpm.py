@@ -4,12 +4,12 @@ from tqdm import tqdm
 
 class Diffusion:
 
-    def __init__(self, noise_steps=100, beta_start=1e-4, beta_end=0.02, img_size=64, device='cpu'):
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, shape=(50, 2, 3), device='cpu'):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
-        self.img_size = img_size
         self.device = device
+        self.shape = shape
 
         self.beta = self.prepare_noise_schedule().to(device)
         self.alpha = 1 - self.beta
@@ -21,7 +21,7 @@ class Diffusion:
     def noise_images(self, x, t):
         """
 
-        :param x: A clean image [b, h, w, c]
+        :param x: A clean image [b, h, w, c]. Or for trajs, [b, time, action_dim, 1]
         :param t: time index
         :return: noisy image [b, h, w, c] and the unscaled image noise [b, h, w, c]
         """
@@ -45,7 +45,7 @@ class Diffusion:
     def sample(self, model, n):
         model.eval()
         with torch.no_grad():
-            x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
+            x = torch.randn((n,) + self.shape).to(self.device)
             for i in tqdm(reversed(range(0, self.noise_steps)), total=self.noise_steps):
                 t = (torch.ones(n) * i).long().to(self.device)
                 predicted_noise = model(x, t)

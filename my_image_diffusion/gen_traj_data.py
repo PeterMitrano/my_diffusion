@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 def make_traj(start, goal, obstacle, rng, lim):
@@ -57,18 +56,37 @@ def main():
     root = Path("data/trajs")
     root.mkdir(exist_ok=True, parents=True)
 
-    for i in range(250):
+    n_samples = 1_000
+    trajs_dataset = []
+    for i in range(n_samples):
         rng = np.random.RandomState(i)
         goal = rng.rand(2) * 0.1 + 1.75
         traj, potential_field = make_traj(start, goal, obstacle, rng, lim)
 
+        # import matplotlib.pyplot as plt
+        # plt.figure()
+        # plt.plot(traj[:, 0], traj[:, 1], color='k')
+        # plt.scatter(obstacle[0], obstacle[1], color='red', s=100)
+        # plt.scatter(start[0], start[1], color='green')
+        # plt.scatter(goal[0], goal[1], color='blue')
+        # plt.imshow(np.flipud(potential_field), extent=(0, lim, 0, lim))
+        # plt.savefig(root / f"traj_{i}.png")
+
+        # downsample to a fixed length
+        time = 50
+        i = np.linspace(0, len(traj) - 1, time)
+        l = np.floor(i).astype(int)
+        l = np.clip(l, 0, len(traj) - 2)
+        alpha = (i - l)[:, None]
+        traj_interp = (1 - alpha) * traj[l] + alpha * traj[l + 1]
+
+        import matplotlib.pyplot as plt
         plt.figure()
         plt.plot(traj[:, 0], traj[:, 1], color='k')
-        plt.scatter(obstacle[0], obstacle[1], color='red', s=100)
-        plt.scatter(start[0], start[1], color='green')
-        plt.scatter(goal[0], goal[1], color='blue')
-        plt.imshow(np.flipud(potential_field), extent=(0, lim, 0, lim))
-        plt.savefig(root / f"traj_{i}.png")
+        plt.show()
+
+        trajs_dataset.append(traj_interp)
+    np.save(root / f"trajs.npy", trajs_dataset)
 
 
 if __name__ == '__main__':

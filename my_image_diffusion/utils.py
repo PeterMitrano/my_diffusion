@@ -1,10 +1,12 @@
 from math import floor
+from pathlib import Path
 
+import numpy as np
 import torch
 import torchvision
 from PIL import Image
 from matplotlib import pyplot as plt
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 
 def plot_images(images):
@@ -22,7 +24,7 @@ def save_images(images, path, **kwargs):
     im.save(path)
 
 
-def get_data(dataset_path, image_size, batch_size):
+def get_images_dataloader(dataset_path, image_size, batch_size):
     transforms = torchvision.transforms.Compose([
         torchvision.transforms.Resize((64, 64)),  # args.image_size + 1/4 *args.image_size
         # torchvision.transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0)),
@@ -34,3 +36,33 @@ def get_data(dataset_path, image_size, batch_size):
     dataset.samples = dataset.samples[:n_total]
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return dataloader
+
+class TrajDataset(Dataset):
+    def __init__(self, dataset_path: Path, transform=None):
+        self.npy_file = dataset_path / "trajs" / "trajs.npy"
+        self.data = np.load(self.npy_file)
+        self.time = self.data.shape[1]
+        self.action_dim = self.data.shape[2]
+        self.transform = torchvision.transforms.Compose([
+            # torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(0, 1),
+        ])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+        sample = torch.from_numpy(sample).float()
+        sample = sample[None, ...]
+
+        if self.transform:
+            sample = self.transform(sample)
+
+        return sample
+
+
+def find_latest_checkpoint(path: Path):
+    ckpts = path.glob("*.pt")
+    ckpts = sorted(ckpts, key=lambda x: int(x.stem.split("_")[1]))
+    return ckpts[-1]
