@@ -1,3 +1,4 @@
+from math import floor
 
 import torch
 import torchvision
@@ -23,12 +24,13 @@ def save_images(images, path, **kwargs):
 
 def get_data(dataset_path, image_size, batch_size):
     transforms = torchvision.transforms.Compose([
-        torchvision.transforms.Resize(80),  # args.image_size + 1/4 *args.image_size
-        torchvision.transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0)),
+        torchvision.transforms.Resize((64, 64)),  # args.image_size + 1/4 *args.image_size
+        # torchvision.transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0)),
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     dataset = torchvision.datasets.ImageFolder(dataset_path, transform=transforms)
-    assert len(dataset) % batch_size == 0
+    n_total = floor(len(dataset) / batch_size) * batch_size
+    dataset.samples = dataset.samples[:n_total]
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return dataloader

@@ -10,25 +10,36 @@ from my_image_diffusion.my_unet import UNet
 from my_image_diffusion.utils import get_data, save_images
 
 
+def find_latest_checkpoint(path: Path):
+    ckpts = path.glob("*.pt")
+    ckpts = sorted(ckpts, key=lambda x: int(x.stem.split("_")[1]))
+    return ckpts[-1]
+
+
 def train():
     dataset_path = Path("data")
     image_size = 64
     batch_size = 9
-
-    dataloader = get_data(dataset_path, image_size, batch_size)
-    model = UNet()
-    opt = optim.AdamW(model.parameters(), lr=1e-4)
-    mse = nn.MSELoss()
-    diffusion = Diffusion(img_size=image_size)
-    tb_writer = SummaryWriter()
-    l = len(dataloader)
 
     results_dir = Path("results")
     results_dir.mkdir(exist_ok=True)
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
 
-    for epoch in range(75):
+    dataloader = get_data(dataset_path, image_size, batch_size)
+
+    model = UNet()
+    ckpt = find_latest_checkpoint(models_dir)
+    model_state = torch.load(ckpt, weights_only=True)
+    model.load_state_dict(model_state)
+
+    opt = optim.AdamW(model.parameters(), lr=1e-4)
+    mse = nn.MSELoss()
+    diffusion = Diffusion(img_size=image_size)
+    tb_writer = SummaryWriter()
+    l = len(dataloader)
+
+    for epoch in range(251):
         pbar = tqdm(dataloader)
         for i, (images, _) in enumerate(pbar):
             # show the images
