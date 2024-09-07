@@ -51,7 +51,6 @@ def train():
     for epoch in range(251):
         pbar = tqdm(dataloader)
         for i, images in enumerate(pbar):
-            # show the images
             tb_writer.add_images("train/Images", images, global_step=epoch * l + i)
 
             t = diffusion.sample_timestamps(batch_size)
@@ -66,7 +65,7 @@ def train():
             pbar.set_postfix(EPOCH=epoch, MSE=loss.item())
             tb_writer.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
 
-        if epoch % 10 == 0 and epoch > 0:
+        if epoch % 10 == 0:
             sampled_images = diffusion.sample(model, n=4)
             save_images(sampled_images, results_dir / f"sampled_{epoch}.png")
             tb_writer.add_images("Sampled", sampled_images, global_step=epoch)

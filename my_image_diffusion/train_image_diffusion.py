@@ -29,7 +29,7 @@ def train():
 
     opt = optim.AdamW(model.parameters(), lr=1e-4)
     mse = nn.MSELoss()
-    diffusion = Diffusion(shape=(image_size, image_size, 3))
+    diffusion = Diffusion(shape=(3, image_size, image_size))
     tb_writer = SummaryWriter()
     l = len(dataloader)
 
