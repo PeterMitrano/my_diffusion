@@ -37,8 +37,25 @@ def get_images_dataloader(dataset_path, image_size, batch_size):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return dataloader
 
+
+class ToyDataset(Dataset):
+    def __init__(self, dataset_path: Path):
+        self.npy_file = dataset_path / "trajs" / "1d.npy"
+        self.data = np.load(self.npy_file)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+        # to make the diffusion generic enough to handle images and trajectories, we need 3 dimensions
+        # but here they're all just 1.
+        sample = torch.tensor(sample).reshape([1, 1, 1]).float()
+        return sample
+
+
 class TrajDataset(Dataset):
-    def __init__(self, dataset_path: Path, transform=None):
+    def __init__(self, dataset_path: Path):
         self.npy_file = dataset_path / "trajs" / "trajs.npy"
         self.data = np.load(self.npy_file)
         self.time = self.data.shape[1]

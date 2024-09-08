@@ -1,6 +1,8 @@
 import torch
+import matplotlib.pyplot as plt
+import math
 import torch.nn as nn
-
+from mpmath import hyp3f2
 
 
 class EMA:
@@ -29,6 +31,7 @@ class EMA:
 
     def reset_parameters(self, ema_model, model):
         ema_model.load_state_dict(model.state_dict())
+
 
 class DoubleConv(nn.Module):
 
@@ -131,6 +134,51 @@ class SelfAttention(nn.Module):
         return attention_value.swapaxes(2, 1).reshape(-1, self.shape[0], self.shape[1], self.shape[2])
 
 
+class MyToyMLP(nn.Module):
+
+    def __init__(self, device='cpu'):
+        super().__init__()
+        self.device = device
+
+        self.l1 = nn.Linear(1, 256)
+        self.a1 = nn.GELU()
+        self.l2 = nn.Linear(256, 256)
+        self.a2 = nn.GELU()
+        self.l3 = nn.Linear(256, 256)
+        self.a3 = nn.GELU()
+        self.l4 = nn.Linear(256, 256)
+        self.a4 = nn.GELU()
+        self.l4 = nn.Linear(256, 1)
+        self.a4 = nn.Sigmoid()
+
+    def pos_encoding(self, t, pos_embed_dim=2):
+        freq = 10_000 ** (torch.arange(0, pos_embed_dim, 2, device=self.device).float() / pos_embed_dim)
+        inv_freq = 1 / freq
+        pos_enc_a = torch.sin(t.repeat(1, pos_embed_dim // 2) * inv_freq)
+        pos_enc_b = torch.cos(t.repeat(1, pos_embed_dim // 2) * inv_freq)
+        pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
+
+        import matplotlib.pyplot as plt
+        plt.imshow(pos_enc)
+        plt.show()
+        return pos_enc
+
+    def forward(self, x, t):
+        t = t.unsqueeze(-1).type(torch.float)
+        pos_emb = self.pos_encoding(t)
+
+        h1 = self.l1(x + pos_emb)
+        z1 = self.a1(h1)
+        h2 = self.l2(z1 + pos_emb)
+        z2 = self.a2(h2)
+        h3 = self.l3(z2 + pos_emb)
+        z3 = self.a3(h3)
+        h4 = self.l4(z3 + pos_emb)
+        pred_noise = self.a4(h4)
+
+        return pred_noise
+
+
 class UNet(nn.Module):
 
     def __init__(self, c_in=3, c_out=3, time_dim=256, device='cpu'):
@@ -161,8 +209,9 @@ class UNet(nn.Module):
         self.outc = nn.Conv2d(64, c_out, kernel_size=1)
 
     def pos_encoding(self, t, channels):
-        freq = 10_000 ** torch.arange(0, channels, 2, device=self.device).float() / channels
+        freq = 10_000 ** (torch.arange(0, channels, 2, device=self.device).float() / channels)
         inv_freq = 1 / freq
+        t.repeat(1, channels // 2) * inv_freq
         pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq)
         pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
         pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)

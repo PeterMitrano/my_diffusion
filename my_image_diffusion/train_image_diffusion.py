@@ -19,7 +19,7 @@ def train():
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
 
-    device = 'cuda'
+    device = 'cpu'
     image_size = 64
     batch_size = 9
     dataloader = get_images_dataloader(dataset_path, image_size, batch_size)
