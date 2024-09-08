@@ -30,7 +30,7 @@ class Diffusion:
         sqrt_alpha_hat = sqrt_alpha_hat[:, None, None, None]
         sqrt_one_minus_alpha_hat = sqrt_one_minus_alpha_hat[:, None, None, None]
 
-        epsilon = torch.randn_like(x)
+        epsilon = torch.randn_like(x, device=self.device)
         return sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * epsilon, epsilon
 
     def sample_timestamps(self, n):
@@ -40,7 +40,7 @@ class Diffusion:
         :param n: Number of timesteps to sample
         :return: timestep samples
         """
-        return torch.randint(low=1, high=self.noise_steps, size=(n,))
+        return torch.randint(low=1, high=self.noise_steps, size=(n,)).to(self.device)
 
     def sample(self, model, n):
         model.eval()
