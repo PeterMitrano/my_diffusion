@@ -1,6 +1,8 @@
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 import numpy as np
+from scipy.stats import gaussian_kde
 
 
 def make_traj(start, goal, obstacle, rng, lim):
@@ -56,14 +58,51 @@ def main():
     root = Path("data/trajs")
     root.mkdir(exist_ok=True, parents=True)
 
-    n_samples = 250
-    trajs_dataset = []
+    n_samples = 5_000
+    gen_1d_examples(n_samples, root)
+    # gen_traj_images(start, obstacle, lim, n_samples, root)
+    # gen_traj_npy(start, obstacle, lim, n_samples)
+
+def gen_1d_examples(n_samples, root):
+    counts = np.array([0, 1, 2, 4, 8, 10, 16, 8, 4, 2, 0, 0, 0, 0, 0, 1, 20, 26, 45, 30, 20, 10, 2, 0, 0, 0])
+    # define a distribution using the counts, then sample from it n_samples
+    rng = np.random.RandomState(0)
+    categories = np.linspace(-1, 1, len(counts))
+
+    def _simple_probs(x):
+        return x / np.sum(x)
+
+    probabilities = _simple_probs(counts)
+
+    # NOTE: these samples are all integers, but we're going to treat it as continuous for the purpose of representing
+    # the distribution with a diffusion model
+    cat_samples = rng.choice(categories, size=n_samples, p=probabilities)
+    kernel = gaussian_kde(cat_samples)
+    new_samples = np.squeeze(kernel.resample(n_samples, seed=1))
+
+    plt.figure()
+    plt.hist(new_samples, bins=50)
+    plt.show()
+
+    plt.figure()
+    plt.plot(categories, counts)
+    plt.show()
+
+    np.save(root / "1d.npy", new_samples)
+
+
+
+def gen_trajs(start, obstacle, lim, n_samples):
     for i in range(n_samples):
         rng = np.random.RandomState(i)
         goal = rng.rand(2) * 0.1 + 1.75
         traj, potential_field = make_traj(start, goal, obstacle, rng, lim)
 
-        import matplotlib.pyplot as plt
+        yield i, traj, goal, potential_field
+
+
+def gen_traj_images(start, obstacle, lim, n_samples, root):
+    for i, traj, goal, potential_field in gen_trajs(start, obstacle, lim, n_samples):
         plt.figure()
         plt.plot(traj[:, 0], traj[:, 1], color='k')
         plt.scatter(obstacle[0], obstacle[1], color='red', s=100)
@@ -75,20 +114,23 @@ def main():
         plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
         plt.savefig(root / f"traj_{i}.png")
 
+
+def gen_traj_npy(start, obstacle, lim, n_samples, root):
+    trajs_dataset = []
+    for i, traj, goal, potential_field in gen_trajs(start, obstacle, lim, n_samples):
         # downsample to a fixed length
-        # time = 50
-        # i = np.linspace(0, len(traj) - 1, time)
-        # l = np.floor(i).astype(int)
-        # l = np.clip(l, 0, len(traj) - 2)
-        # alpha = (i - l)[:, None]
-        # traj_interp = (1 - alpha) * traj[l] + alpha * traj[l + 1]
-        #
-        # import matplotlib.pyplot as plt
-        # plt.figure()
-        # plt.plot(traj[:, 0], traj[:, 1], color='k')
-        # plt.show()
-        # trajs_dataset.append(traj_interp)
-    # np.save(root / f"trajs.npy", trajs_dataset)
+        time = 50
+        i = np.linspace(0, len(traj) - 1, time)
+        l = np.floor(i).astype(int)
+        l = np.clip(l, 0, len(traj) - 2)
+        alpha = (i - l)[:, None]
+        traj_interp = (1 - alpha) * traj[l] + alpha * traj[l + 1]
+
+        plt.figure()
+        plt.plot(traj[:, 0], traj[:, 1], color='k')
+        plt.show()
+        trajs_dataset.append(traj_interp)
+    np.save(root / f"trajs.npy", trajs_dataset)
 
 
 if __name__ == '__main__':
