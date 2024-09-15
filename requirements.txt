@@ -1,0 +1,9 @@
+matplotlib
+numpy
+scipy
+tensorboard
+torch
+torchvision
+tqdm
+rerun-sdk
+wandb

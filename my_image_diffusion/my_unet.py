@@ -1,8 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
-import math
 import torch.nn as nn
-from mpmath import hyp3f2
 
 
 class EMA:
@@ -60,7 +58,7 @@ class Down(nn.Module):
     def __init__(self, in_channels, out_channels, emb_dim=256):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
+            # nn.MaxPool2d(2),
             DoubleConv(in_channels, in_channels, residual=True),
             DoubleConv(in_channels, out_channels),
         )
@@ -126,66 +124,104 @@ class SelfAttention(nn.Module):
 
     def forward(self, x):
         # Move the channel dimension to the end, and flatten the spatial dimensions
-        x = x.reshape(-1, self.shape[0], self.shape[1] * self.shape[2]).swapaxes(1, 2)
+        x = x.reshape(-1, self.shape[0], self.shape[1] * self.shape[2])
+        x = x.swapaxes(1, 2)
         x_ln = self.ln(x)
         attention_value, _ = self.mha(x_ln, x_ln, x_ln)
         attention_value = attention_value * x
         attention_value = self.ff_self(attention_value) + attention_value
-        return attention_value.swapaxes(2, 1).reshape(-1, self.shape[0], self.shape[1], self.shape[2])
+        attention_out = attention_value.swapaxes(2, 1).reshape(-1, self.shape[0], self.shape[1], self.shape[2])
+        return attention_out
+
+
+class LinearWithPosEmb(nn.Module):
+
+    def __init__(self, in_dim, out_dim, emb_dim):
+        super().__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+
+        self.linear = nn.Linear(in_dim, out_dim)
+        self.a = nn.GELU()
+        self.emb_layer = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(
+                emb_dim,
+                out_dim
+            )
+        )
+
+    def forward(self, x, t):
+        h = self.linear(x)
+        a = self.a(h)
+        emb = self.emb_layer(t)[:, None, None, :]
+        return a + emb
 
 
 class MyToyMLP(nn.Module):
 
-    def __init__(self, device='cpu'):
+    def __init__(self, emb_dim=64, device='cpu'):
         super().__init__()
+        self.emb_dim = emb_dim
         self.device = device
 
-        self.l1 = nn.Linear(1, 256)
+        self.l1 = LinearWithPosEmb(1, 256, emb_dim)
         self.a1 = nn.GELU()
-        self.l2 = nn.Linear(256, 256)
+        self.l2 = LinearWithPosEmb(256, 256, emb_dim)
         self.a2 = nn.GELU()
-        self.l3 = nn.Linear(256, 256)
+        self.l3 = LinearWithPosEmb(256, 256, emb_dim)
         self.a3 = nn.GELU()
-        self.l4 = nn.Linear(256, 256)
+        self.l4 = LinearWithPosEmb(256, 256, emb_dim)
         self.a4 = nn.GELU()
-        self.l4 = nn.Linear(256, 1)
-        self.a4 = nn.Sigmoid()
+        self.l4 = LinearWithPosEmb(256, 1, emb_dim)
 
-    def pos_encoding(self, t, pos_embed_dim=2):
+    def pos_encoding(self, t, pos_embed_dim=64):
         freq = 10_000 ** (torch.arange(0, pos_embed_dim, 2, device=self.device).float() / pos_embed_dim)
         inv_freq = 1 / freq
         pos_enc_a = torch.sin(t.repeat(1, pos_embed_dim // 2) * inv_freq)
         pos_enc_b = torch.cos(t.repeat(1, pos_embed_dim // 2) * inv_freq)
         pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
 
-        import matplotlib.pyplot as plt
-        plt.imshow(pos_enc)
-        plt.show()
         return pos_enc
 
     def forward(self, x, t):
         t = t.unsqueeze(-1).type(torch.float)
-        pos_emb = self.pos_encoding(t)
+        pos_emb = self.pos_encoding(t, self.emb_dim)
 
-        h1 = self.l1(x + pos_emb)
+        h1 = self.l1(x, pos_emb)
         z1 = self.a1(h1)
-        h2 = self.l2(z1 + pos_emb)
+        h2 = self.l2(z1, pos_emb)
         z2 = self.a2(h2)
-        h3 = self.l3(z2 + pos_emb)
+        h3 = self.l3(z2, pos_emb)
         z3 = self.a3(h3)
-        h4 = self.l4(z3 + pos_emb)
-        pred_noise = self.a4(h4)
+        pred_noise = self.l4(z3, pos_emb)
 
+        # fig, ax = plt.subplots(2, 3)
+        # ax[0, 0].hist(h1.flatten().detach().cpu().numpy())
+        # ax[0, 1].hist(h2.flatten().detach().cpu().numpy())
+        # ax[1, 0].hist(h3.flatten().detach().cpu().numpy())
+        # ax[1, 1].hist(h4.flatten().detach().cpu().numpy())
+        # ax[1, 2].hist(pred_noise.flatten().detach().cpu().numpy())
+        # for a_row in ax:
+        #     for a_i in a_row:
+        #         a_i.set_xlim(-1, 1)
+        # plt.show()
+
+        if self.training:
+            plt.figure()
+            plt.hist(pred_noise.squeeze().detach().numpy(), color='r')
+            plt.xlim([-3.5, 3.5])
+            plt.show()
         return pred_noise
 
 
 class UNet(nn.Module):
 
-    def __init__(self, c_in=3, c_out=3, time_dim=256, device='cpu'):
+    def __init__(self, c_in=3, c_out=3, pos_emb_dim=256, device='cpu'):
         super().__init__()
         self.c_in = c_in
         self.c_out = c_out
-        self.time_dim = time_dim
+        self.pos_emb_dim = pos_emb_dim
         self.device = device
 
         self.inc = DoubleConv(c_in, 64)
@@ -219,7 +255,7 @@ class UNet(nn.Module):
 
     def forward(self, x, t):
         t = t.unsqueeze(-1).type(torch.float)
-        t = self.pos_encoding(t, self.time_dim)
+        t = self.pos_encoding(t, self.pos_emb_dim)
 
         x1 = self.inc(x)
         x2 = self.down1(x1, t)

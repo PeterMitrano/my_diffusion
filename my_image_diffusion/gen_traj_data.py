@@ -58,7 +58,7 @@ def main():
     root = Path("data/trajs")
     root.mkdir(exist_ok=True, parents=True)
 
-    n_samples = 5_000
+    n_samples = 128 * 32
     gen_1d_examples(n_samples, root)
     # gen_traj_images(start, obstacle, lim, n_samples, root)
     # gen_traj_npy(start, obstacle, lim, n_samples)
@@ -67,7 +67,9 @@ def gen_1d_examples(n_samples, root):
     counts = np.array([0, 1, 2, 4, 8, 10, 16, 8, 4, 2, 0, 0, 0, 0, 0, 1, 20, 26, 45, 30, 20, 10, 2, 0, 0, 0])
     # define a distribution using the counts, then sample from it n_samples
     rng = np.random.RandomState(0)
-    categories = np.linspace(-1, 1, len(counts))
+    xmin = -1
+    xmax = 1
+    categories = np.linspace(xmin, xmax, len(counts))
 
     def _simple_probs(x):
         return x / np.sum(x)
@@ -79,6 +81,7 @@ def gen_1d_examples(n_samples, root):
     cat_samples = rng.choice(categories, size=n_samples, p=probabilities)
     kernel = gaussian_kde(cat_samples)
     new_samples = np.squeeze(kernel.resample(n_samples, seed=1))
+    new_samples = np.clip(new_samples, xmin, xmax)
 
     plt.figure()
     plt.hist(new_samples, bins=50)
