@@ -88,13 +88,13 @@ class Diffusion:
                 t = (torch.ones(noise_steps) * i).long().to(self.device)
                 predicted_noise = model(x, t)
 
-                if i % 100 == 0:
-                    fig, ax = plt.subplots(1, 1)
-                    ax.hist(predicted_noise.squeeze().detach().numpy(), color='m')
-                    ax.set_xlim([-3.5, 3.5])
+                if i % 100 == 0 and x.shape[1] == 1:
+                    plt.figure()
+                    plt.title(f"pred noise dist when sampling {i=}")
+                    plt.hist(predicted_noise.squeeze().detach().numpy(), color='m', bins=50)
+                    plt.xlim([-2, 2])
+                    plt.ylim([0, 100])
                     plt.show()
-                # counts = np.histogram(predicted_noise.squeeze().detach().numpy(), bins=100, range=(-3.5, 3.5))[0]
-                # rr.log("sample/predicted_noise", rr.BarChart(counts))
 
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_hat = self.alpha_hat[t][:, None, None, None]
@@ -103,8 +103,6 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (
-                        x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(
-                    beta) * noise
+                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
         model.train()
         return x

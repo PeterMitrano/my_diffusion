@@ -1,6 +1,9 @@
+import math
+
 import torch
 import matplotlib.pyplot as plt
 import torch.nn as nn
+from tensorboard.summary.v1 import image
 
 
 class EMA:
@@ -58,7 +61,7 @@ class Down(nn.Module):
     def __init__(self, in_channels, out_channels, emb_dim=256):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            # nn.MaxPool2d(2),
+            nn.MaxPool2d(2),
             DoubleConv(in_channels, in_channels, residual=True),
             DoubleConv(in_channels, out_channels),
         )
@@ -71,9 +74,9 @@ class Down(nn.Module):
             )
         )
 
-    def forward(self, x, t):
+    def forward(self, x, t_emb):
         x = self.maxpool_conv(x)
-        emb = self.emb_layer(t)[:, :, None, None].repeat(1, 1, x.shape[-2], x.shape[-1])
+        emb = self.emb_layer(t_emb)[:, :, None, None].repeat(1, 1, x.shape[-2], x.shape[-1])
         return x + emb
 
 
@@ -95,11 +98,11 @@ class Up(nn.Module):
             )
         )
 
-    def forward(self, x, skip_x, t):
+    def forward(self, x, skip_x, t_emb):
         x = self.up(x)
         x = torch.cat([skip_x, x], dim=1)
         x = self.conv(x)
-        emb = self.emb_layer(t)[:, :, None, None].repeat(1, 1, x.shape[-2], x.shape[-1])
+        emb = self.emb_layer(t_emb)[:, :, None, None].repeat(1, 1, x.shape[-2], x.shape[-1])
         return x + emb
 
 
@@ -160,20 +163,20 @@ class LinearWithPosEmb(nn.Module):
 
 class MyToyMLP(nn.Module):
 
-    def __init__(self, emb_dim=64, device='cpu'):
+    def __init__(self, emb_dim=256, device='cpu'):
         super().__init__()
         self.emb_dim = emb_dim
         self.device = device
 
-        self.l1 = LinearWithPosEmb(1, 256, emb_dim)
-        self.a1 = nn.GELU()
-        self.l2 = LinearWithPosEmb(256, 256, emb_dim)
-        self.a2 = nn.GELU()
+        self.l1 = LinearWithPosEmb(1, 64, emb_dim)
+        self.a1 = nn.Tanh()
+        self.l2 = LinearWithPosEmb(64, 256, emb_dim)
+        self.a2 = nn.Tanh()
         self.l3 = LinearWithPosEmb(256, 256, emb_dim)
-        self.a3 = nn.GELU()
-        self.l4 = LinearWithPosEmb(256, 256, emb_dim)
-        self.a4 = nn.GELU()
-        self.l4 = LinearWithPosEmb(256, 1, emb_dim)
+        self.a3 = nn.Tanh()
+        self.l4 = LinearWithPosEmb(256, 64, emb_dim)
+        self.a4 = nn.Tanh()
+        self.l4 = LinearWithPosEmb(64, 1, emb_dim)
 
     def pos_encoding(self, t, pos_embed_dim=64):
         freq = 10_000 ** (torch.arange(0, pos_embed_dim, 2, device=self.device).float() / pos_embed_dim)
@@ -196,28 +199,75 @@ class MyToyMLP(nn.Module):
         z3 = self.a3(h3)
         pred_noise = self.l4(z3, pos_emb)
 
-        # fig, ax = plt.subplots(2, 3)
-        # ax[0, 0].hist(h1.flatten().detach().cpu().numpy())
-        # ax[0, 1].hist(h2.flatten().detach().cpu().numpy())
-        # ax[1, 0].hist(h3.flatten().detach().cpu().numpy())
-        # ax[1, 1].hist(h4.flatten().detach().cpu().numpy())
-        # ax[1, 2].hist(pred_noise.flatten().detach().cpu().numpy())
-        # for a_row in ax:
-        #     for a_i in a_row:
-        #         a_i.set_xlim(-1, 1)
-        # plt.show()
-
         if self.training:
             plt.figure()
-            plt.hist(pred_noise.squeeze().detach().numpy(), color='r')
-            plt.xlim([-3.5, 3.5])
+            plt.title("pred noise in MyToyMLP when training")
+            plt.hist(pred_noise.squeeze().detach().numpy(), color='r', bins=50)
+            plt.xlim([-2, 2])
+            plt.ylim([0, 100])
             plt.show()
         return pred_noise
 
 
+class SinusoidalTimeEmbedding(nn.Module):
+
+    def __init__(self, embedding_dim, device):
+        super().__init__()
+        self.emb_dim = embedding_dim
+        self.device = device
+
+    # def forward(self, t):
+    #     freq = 10_000 ** (torch.arange(0, self.emb_dim, 2, device=self.device).float() / self.emb_dim)
+    #     inv_freq = 1 / freq
+    #     t.repeat(1, self.emb_dim // 2) * inv_freq
+    #     pos_enc_a = torch.sin(t.repeat(1, self.emb_dim // 2) * inv_freq)
+    #     pos_enc_b = torch.cos(t.repeat(1, self.emb_dim // 2) * inv_freq)
+    #     pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
+    #     return pos_enc
+
+    def forward(self, t):
+        # t is expected to be a Long tensor of shape [batch_size]
+        half_dim = self.emb_dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=t.device) * -emb)
+        emb = t.unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
+        return emb  # Shape: [batch_size, embedding_dim]
+
+
+class MyToyMLP2(nn.Module):
+    def __init__(self, device='cpu'):
+        super().__init__()
+        self.device = device
+
+        # Embedding for the time step t
+        self.time_embed = SinusoidalTimeEmbedding(64, device=device)  # Embedding dim for time steps
+
+        # Main MLP for diffusion
+        self.mlp = nn.Sequential(
+            nn.Linear(1 + 64, 128),  # Input is scalar x and time embedding
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)  # Output is scalar prediction
+        )
+
+    def forward(self, x, t):
+        t_embed = self.time_embed(t)
+
+        x = x.squeeze(1).squeeze(1)  # remove image-like dims
+        x_t = torch.cat([x, t_embed], dim=-1)
+
+        out = self.mlp(x_t)
+        out = out[..., None, None]  # Add back image-like dims
+        return out
+
+
 class UNet(nn.Module):
 
-    def __init__(self, c_in=3, c_out=3, pos_emb_dim=256, device='cpu'):
+    def __init__(self, c_in=3, c_out=3, pos_emb_dim=256, image_size=64, device='cpu'):
         super().__init__()
         self.c_in = c_in
         self.c_out = c_out
@@ -226,55 +276,64 @@ class UNet(nn.Module):
 
         self.inc = DoubleConv(c_in, 64)
         self.down1 = Down(64, 128)
-        self.sa1 = SelfAttention((128, 32, 32))
+        self.sa1 = SelfAttention((128, int(image_size / 2), int(image_size / 2)))
         self.down2 = Down(128, 256)
-        self.sa2 = SelfAttention((256, 16, 16))
+        self.sa2 = SelfAttention((256, int(image_size / 4), int(image_size / 4)))
         self.down3 = Down(256, 256)
-        self.sa3 = SelfAttention((256, 8, 8))
+        self.sa3 = SelfAttention((256, int(image_size / 8), int(image_size / 8)))
 
         self.bot1 = DoubleConv(256, 512)
         self.bot2 = DoubleConv(512, 512)
         self.bot3 = DoubleConv(512, 256)
 
         self.up1 = Up(512, 128)
-        self.sa4 = SelfAttention((128, 16, 16))
+        self.sa4 = SelfAttention((128, int(image_size / 4), int(image_size / 4)))
         self.up2 = Up(256, 64)
-        self.sa5 = SelfAttention((64, 32, 32))
+        self.sa5 = SelfAttention((64, int(image_size / 2), int(image_size / 2)))
         self.up3 = Up(128, 64)
-        self.sa6 = SelfAttention((64, 64, 64))
+        self.sa6 = SelfAttention((64, image_size, image_size))
         self.outc = nn.Conv2d(64, c_out, kernel_size=1)
 
-    def pos_encoding(self, t, channels):
-        freq = 10_000 ** (torch.arange(0, channels, 2, device=self.device).float() / channels)
+        self.time_embed = SinusoidalTimeEmbedding(pos_emb_dim, device=device)
+
+    def pos_encoding(self, t, pos_emb_dim):
+        freq = 10_000 ** (torch.arange(0, pos_emb_dim, 2, device=self.device).float() / pos_emb_dim)
         inv_freq = 1 / freq
-        t.repeat(1, channels // 2) * inv_freq
-        pos_enc_a = torch.sin(t.repeat(1, channels // 2) * inv_freq)
-        pos_enc_b = torch.cos(t.repeat(1, channels // 2) * inv_freq)
+        t.repeat(1, pos_emb_dim // 2) * inv_freq
+        pos_enc_a = torch.sin(t.repeat(1, pos_emb_dim // 2) * inv_freq)
+        pos_enc_b = torch.cos(t.repeat(1, pos_emb_dim // 2) * inv_freq)
         pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
         return pos_enc
 
     def forward(self, x, t):
         t = t.unsqueeze(-1).type(torch.float)
-        t = self.pos_encoding(t, self.pos_emb_dim)
+        # pos_emb = self.pos_encoding(t, self.pos_emb_dim)
+        pos_emb = self.time_embed(t)
 
         x1 = self.inc(x)
-        x2 = self.down1(x1, t)
+        x2 = self.down1(x1, pos_emb)
         x2 = self.sa1(x2)
-        x3 = self.down2(x2, t)
+        x3 = self.down2(x2, pos_emb)
         x3 = self.sa2(x3)
-        x4 = self.down3(x3, t)
+        x4 = self.down3(x3, pos_emb)
         x4 = self.sa3(x4)
 
         x5 = self.bot1(x4)
         x6 = self.bot2(x5)
         x7 = self.bot3(x6)
 
-        x8 = self.up1(x7, x3, t)
+        x8 = self.up1(x7, x3, pos_emb)
         x8 = self.sa4(x8)
-        x9 = self.up2(x8, x2, t)
+        x9 = self.up2(x8, x2, pos_emb)
         x9 = self.sa5(x9)
-        x10 = self.up3(x9, x1, t)
+        x10 = self.up3(x9, x1, pos_emb)
         x10 = self.sa6(x10)
         out = self.outc(x10)
+
+        # if self.training:
+        #     fig, ax = plt.subplots(1, 1)
+        #     predicted_noise_0 = out[:, 0, 0, 0]
+        #     ax.hist(predicted_noise_0.squeeze().detach().numpy(), color='m')
+        #     plt.show()
 
         return out

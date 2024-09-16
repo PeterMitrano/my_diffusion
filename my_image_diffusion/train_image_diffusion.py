@@ -20,11 +20,12 @@ def train():
     models_dir.mkdir(exist_ok=True)
 
     device = 'cpu'
-    image_size = 64
-    batch_size = 9
-    dataloader = get_images_dataloader(dataset_path, image_size, batch_size)
+    image_size = 32
+    batch_size = 10
+    # dataloader = get_images_dataloader(dataset_path, image_size, batch_size)
+    dataloader = [(torch.ones([batch_size, 3, image_size, image_size]) * 0.42, None) for _ in range(10)]
 
-    model = UNet(device=device).to(device)
+    model = UNet(device=device, image_size=image_size).to(device)
 
     ema = EMA(0.995)
     ema_model = copy.deepcopy(model).eval().requires_grad_(False)
@@ -68,7 +69,7 @@ def train():
             pbar.set_postfix(EPOCH=epoch, MSE=loss.item())
             tb_writer.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
 
-        if epoch % 5 == 0 and epoch > 0:
+        if epoch % 5 == 0:
             sampled_images = diffusion.sample(ema_model, noise_steps=8)
             save_images(sampled_images, results_dir / f"sampled_{epoch}.png")
             tb_writer.add_images("Sampled", sampled_images, global_step=epoch * l)

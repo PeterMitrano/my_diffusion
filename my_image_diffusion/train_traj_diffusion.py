@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from my_image_diffusion.ddpm import Diffusion
-from my_image_diffusion.my_unet import MyToyMLP, UNet
+from my_image_diffusion.my_unet import MyToyMLP, MyToyMLP2, UNet
 from my_image_diffusion.utils import save_images, find_latest_checkpoint, TrajDataset, ToyDataset
 
 
@@ -33,7 +33,8 @@ def train():
     dataset = ToyDataset(dataset_path)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    model = MyToyMLP()
+    # model = MyToyMLP()
+    model = MyToyMLP2()
     # model = UNet(c_in=1, c_out=1)
 
     opt = optim.AdamW(model.parameters(), lr=1e-4)
@@ -42,7 +43,7 @@ def train():
     l = len(dataloader)
 
     diffusion = Diffusion(shape=(1, 1, 1), noise_steps=1000, beta_start=5e-5, beta_end=0.01)
-    diffusion.viz_fwd_diffusion(next(iter(dataloader)).squeeze())
+    # diffusion.viz_fwd_diffusion(next(iter(dataloader)).squeeze())
     
     # import wandb
     # wandb.init(project="my_diffusion")
@@ -67,6 +68,10 @@ def train():
             #     rr.log("x_t", rr.BarChart(x_t_counts))
 
             predicted_noise = model(x_t, t)
+            # debug_pred_noise = model(x_t, torch.ones_like(t)*999)
+            # plt.figure()
+            # plt.hist(debug_pred_noise.squeeze().detach().numpy(), color='g')
+            # plt.show()
             loss = mse(predicted_noise, noise)
 
             opt.zero_grad()
@@ -80,7 +85,7 @@ def train():
             samples = diffusion.sample(model, noise_steps=diffusion.noise_steps)
             samples = np.squeeze(samples.numpy())
             plt.figure()
-            plt.hist(samples)
+            plt.hist(samples, color='b')
             plt.savefig(results_dir / "samples_hist.png")
             plt.show()
 
