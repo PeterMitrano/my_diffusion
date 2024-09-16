@@ -45,7 +45,7 @@ def train():
     # plot the toy data as histogram
     plt.figure()
     plt.title("Training Data Histogram")
-    plt.hist(dataset.data, bins=25)
+    plt.hist(dataset.data, bins=25, color='r')
     plt.xlim([-1, 1])
     fig_path = results_dir / "toy_data_hist.png"
     plt.savefig(fig_path)
@@ -53,10 +53,10 @@ def train():
     log_fig(tb_writer, "training_dataset_hist", fig_path, 0)
     plt.close()
 
-    diffusion = Diffusion(shape=(1,), noise_steps=10, beta_start=1e-4, beta_end=0.02)
-    # diffusion.viz_fwd_diffusion(next(iter(dataloader)).squeeze())
+    diffusion = Diffusion(shape=(1,), noise_steps=100, beta_start=1e-4, beta_end=0.02)
+    diffusion.viz_fwd_diffusion(next(iter(dataloader)).squeeze())
 
-    for epoch in range(20):
+    for epoch in range(30):
         pbar = tqdm(dataloader)
         for i, images in enumerate(pbar):
             t = diffusion.sample_timestamps(batch_size)
@@ -73,18 +73,30 @@ def train():
             pbar.set_postfix(EPOCH=epoch, MSE=loss.item())
             tb_writer.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
 
-        if epoch % 4 == 0:
-            samples = diffusion.sample_scalar(model, n_samples=1_000)
-            samples = np.squeeze(samples.numpy())
+        if epoch % 2 == 0:
+            n_test_samples =1_000
+            samples, all_samples = diffusion.sample_scalar(model, n_samples=n_test_samples)
             plt.figure()
-            plt.hist(samples, color='b', bins=25)
+            plt.hist(dataset.data[:n_test_samples], bins=25, color='r', alpha=0.5)
+            plt.hist(samples, color='b', bins=25, alpha=0.5)
             plt.xlim([-1, 1])
             fig_path = results_dir / "samples_hist.png"
             plt.savefig(fig_path)
             log_fig(tb_writer, "samples_hist", fig_path, epoch)
             plt.close()
 
-    samples = diffusion.sample_scalar(model, n_samples=1_000)
+            # visualize the reverse diffusion process which takes samples from a unit gaussian and
+            # moves them back to the original distribution
+            plt.figure()
+            for sample in all_samples.T:
+                plt.plot(sample, alpha=0.05, c='k')
+            fig_path = results_dir / "sampling_process.png"
+            plt.savefig(fig_path)
+            log_fig(tb_writer, "sampling_process", fig_path, epoch)
+            plt.close()
+
+
+    samples, _ = diffusion.sample_scalar(model, n_samples=1_000)
     samples = np.squeeze(samples.numpy())
     plt.figure()
     plt.hist(samples, color='b', bins=25)

@@ -93,19 +93,13 @@ class Diffusion:
 
     def sample_scalar(self, model, n_samples):
         model.eval()
+        all_samples = []
         with torch.no_grad():
             x = torch.randn((n_samples,) + self.shape).to(self.device)
             for i in tqdm(reversed(range(0, self.noise_steps)), total=self.noise_steps):
                 t = (torch.ones(n_samples) * i).long().to(self.device)
                 predicted_noise = model(x, t)
-
-                # if i % 100 == 0 and x.shape[1] == 1:
-                #     plt.figure()
-                #     plt.title(f"pred noise dist when sampling {i=}")
-                #     plt.hist(predicted_noise.squeeze().detach().numpy(), color='m', bins=50)
-                #     plt.xlim([-2, 2])
-                #     plt.ylim([0, 100])
-                #     plt.show()
+                all_samples.append(x.detach().numpy())
 
                 alpha = self.alpha[t][:, None]
                 alpha_hat = self.alpha_hat[t][:, None]
@@ -116,7 +110,9 @@ class Diffusion:
                     noise = torch.zeros_like(x)
                 x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
         model.train()
-        return x
+        all_samples = np.squeeze(np.array(all_samples))
+        x = np.squeeze(x.numpy())
+        return x, all_samples
 
     def sample_images(self, model, n_samples):
         model.eval()
