@@ -71,6 +71,17 @@ class Diffusion:
 
         return sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * epsilon, epsilon
 
+    def noise_scalar(self, x, t):
+        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])
+        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])  # beta hat?
+        sqrt_alpha_hat = sqrt_alpha_hat[:, None]
+        sqrt_one_minus_alpha_hat = sqrt_one_minus_alpha_hat[:, None]
+
+        epsilon = torch.randn_like(x, device=self.device)
+
+        noise_scalar = sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * epsilon
+        return noise_scalar, epsilon
+
     def sample_timestamps(self, n):
         """
         used to generate targets when training
@@ -80,21 +91,40 @@ class Diffusion:
         """
         return torch.randint(low=1, high=self.noise_steps, size=(n,)).to(self.device)
 
-    def sample(self, model, noise_steps):
+    def sample_scalar(self, model, n_samples):
         model.eval()
         with torch.no_grad():
-            x = torch.randn((noise_steps,) + self.shape).to(self.device)
+            x = torch.randn((n_samples,) + self.shape).to(self.device)
             for i in tqdm(reversed(range(0, self.noise_steps)), total=self.noise_steps):
-                t = (torch.ones(noise_steps) * i).long().to(self.device)
+                t = (torch.ones(n_samples) * i).long().to(self.device)
                 predicted_noise = model(x, t)
 
-                if i % 100 == 0 and x.shape[1] == 1:
-                    plt.figure()
-                    plt.title(f"pred noise dist when sampling {i=}")
-                    plt.hist(predicted_noise.squeeze().detach().numpy(), color='m', bins=50)
-                    plt.xlim([-2, 2])
-                    plt.ylim([0, 100])
-                    plt.show()
+                # if i % 100 == 0 and x.shape[1] == 1:
+                #     plt.figure()
+                #     plt.title(f"pred noise dist when sampling {i=}")
+                #     plt.hist(predicted_noise.squeeze().detach().numpy(), color='m', bins=50)
+                #     plt.xlim([-2, 2])
+                #     plt.ylim([0, 100])
+                #     plt.show()
+
+                alpha = self.alpha[t][:, None]
+                alpha_hat = self.alpha_hat[t][:, None]
+                beta = self.beta[t][:, None]
+                if i > 1:
+                    noise = torch.randn_like(x)
+                else:
+                    noise = torch.zeros_like(x)
+                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+        model.train()
+        return x
+
+    def sample_images(self, model, n_samples):
+        model.eval()
+        with torch.no_grad():
+            x = torch.randn((n_samples,) + self.shape).to(self.device)
+            for i in tqdm(reversed(range(0, self.noise_steps)), total=self.noise_steps):
+                t = (torch.ones(n_samples) * i).long().to(self.device)
+                predicted_noise = model(x, t)
 
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_hat = self.alpha_hat[t][:, None, None, None]
@@ -105,4 +135,6 @@ class Diffusion:
                     noise = torch.zeros_like(x)
                 x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
         model.train()
+        x = x * 255
+        x = torch.clamp(x, 0, 255)
         return x

@@ -58,13 +58,15 @@ def main():
     root = Path("data/trajs")
     root.mkdir(exist_ok=True, parents=True)
 
-    n_samples = 128 * 32
+    n_samples = 1024 * 32
     gen_1d_examples(n_samples, root)
     # gen_traj_images(start, obstacle, lim, n_samples, root)
     # gen_traj_npy(start, obstacle, lim, n_samples)
 
+
 def gen_1d_examples(n_samples, root):
-    counts = np.array([0, 1, 2, 4, 8, 10, 16, 8, 4, 2, 0, 0, 0, 0, 0, 1, 20, 26, 45, 30, 20, 10, 2, 0, 0, 0])
+    # counts = np.array([0, 1, 2, 4, 8, 10, 16, 8, 4, 2, 0, 0, 0, 0, 0, 1, 20, 26, 45, 30, 20, 10, 2, 0, 0, 0])
+    counts = np.array([1, 1, 1, 1, 100, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 1, 1, 1])
     # define a distribution using the counts, then sample from it n_samples
     rng = np.random.RandomState(0)
     xmin = -1
@@ -80,19 +82,19 @@ def gen_1d_examples(n_samples, root):
     # the distribution with a diffusion model
     cat_samples = rng.choice(categories, size=n_samples, p=probabilities)
     kernel = gaussian_kde(cat_samples)
-    new_samples = np.squeeze(kernel.resample(n_samples, seed=1))
-    new_samples = np.clip(new_samples, xmin, xmax)
+    samples = np.squeeze(kernel.resample(n_samples, seed=1))
 
     plt.figure()
-    plt.hist(new_samples, bins=50)
-    plt.show()
-
-    plt.figure()
+    plt.title("Original distribution")
     plt.plot(categories, counts)
     plt.show()
 
-    np.save(root / "1d.npy", new_samples)
+    plt.figure()
+    plt.title("New distribution")
+    plt.hist(samples, bins=50)
+    plt.show()
 
+    np.save(root / "1d.npy", samples)
 
 
 def gen_trajs(start, obstacle, lim, n_samples):

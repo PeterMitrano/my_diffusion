@@ -199,13 +199,13 @@ class MyToyMLP(nn.Module):
         z3 = self.a3(h3)
         pred_noise = self.l4(z3, pos_emb)
 
-        if self.training:
-            plt.figure()
-            plt.title("pred noise in MyToyMLP when training")
-            plt.hist(pred_noise.squeeze().detach().numpy(), color='r', bins=50)
-            plt.xlim([-2, 2])
-            plt.ylim([0, 100])
-            plt.show()
+        # if self.training:
+        #     plt.figure()
+        #     plt.title("pred noise in MyToyMLP when training")
+        #     plt.hist(pred_noise.squeeze().detach().numpy(), color='r', bins=50)
+        #     plt.xlim([-2, 2])
+        #     plt.ylim([0, 100])
+        #     plt.show()
         return pred_noise
 
 
@@ -257,11 +257,9 @@ class MyToyMLP2(nn.Module):
     def forward(self, x, t):
         t_embed = self.time_embed(t)
 
-        x = x.squeeze(1).squeeze(1)  # remove image-like dims
         x_t = torch.cat([x, t_embed], dim=-1)
 
         out = self.mlp(x_t)
-        out = out[..., None, None]  # Add back image-like dims
         return out
 
 
@@ -337,3 +335,56 @@ class UNet(nn.Module):
         #     plt.show()
 
         return out
+
+
+class SelfAttentionBlock(nn.Module):
+    def __init__(self, dim, num_heads=4):
+        super(SelfAttentionBlock, self).__init__()
+        self.attention = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads)
+        self.layernorm = nn.LayerNorm(dim)
+        self.ff = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.ReLU(),
+            nn.Linear(dim * 4, dim)
+        )
+
+    def forward(self, x):
+        # Self-attention expects [sequence_length, batch_size, embedding_dim] format
+        # Here we treat the scalar as a sequence of length 1, so no real 'sequence' exists
+        # We will pass just the embedding features
+        x = x.unsqueeze(0)  # Add a fake sequence length dimension
+        attn_output, _ = self.attention(x, x, x)
+        x = self.layernorm(x + attn_output)
+        x = self.layernorm(x + self.ff(x))
+        return x.squeeze(0)  # Remove the fake sequence length dimension
+
+
+class DiffusionModelWithAttention(nn.Module):
+    def __init__(self, device='cpu'):
+        super().__init__()
+
+        h1 = 128
+        h2 = 128
+        time_emb_dim = 64
+        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, device=device)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(1 + time_emb_dim, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h2)
+        )
+
+        self.attention = SelfAttentionBlock(dim=h2, num_heads=4)
+
+        self.final_layer = nn.Linear(h2, 1)
+
+    def forward(self, x, t):
+        t_embed = self.time_embed(t)
+        x_t = torch.cat([x, t_embed], dim=-1)
+        x = self.mlp(x_t)
+        x = self.attention(x)
+        return self.final_layer(x)

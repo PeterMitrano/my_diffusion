@@ -50,7 +50,7 @@ class ToyDataset(Dataset):
         sample = self.data[idx]
         # to make the diffusion generic enough to handle images and trajectories, we need 3 dimensions
         # but here they're all just 1.
-        sample = torch.tensor(sample).reshape([1, 1, 1]).float()
+        sample = torch.tensor(sample).reshape([1,]).float()
         return sample
 
 
