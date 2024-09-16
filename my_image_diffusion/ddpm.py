@@ -21,7 +21,7 @@ class Diffusion:
     def prepare_noise_schedule(self):
         return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
 
-    def viz_fwd_diffusion(self, x_0):
+    def fwd_diffusion(self, x_0):
         """
         Visualize the forward diffusion process the iterative way and compare the one-step version
         """
@@ -40,18 +40,9 @@ class Diffusion:
             us.append(u)
             sigmas.append(sigma)
         xs = np.array(xs)
-
-        plt.figure()
-        # plot each sample in xs as a line with low opacity
-        for i in range(n_test_samples):
-            plt.plot(xs[:, i], alpha=0.05, c='k')
-        plt.show()
-
-        plt.figure()
-        plt.title("final gaussian")
-        plt.hist(xs[-1], bins=100)
-        plt.show()
-        print(f"final mean: {us[-1]}, final std: {sigmas[-1]}")
+        us = np.array(us)
+        sigmas = np.array(sigmas)
+        return xs, us, sigmas
 
     def noise_images(self, x, t):
         """
