@@ -31,11 +31,11 @@ def train():
     config = {
         'lr': 1e-5,
         'batch_size': 128,
-        'noise_steps': 10,
+        'noise_steps': 45,
         'beta_start': 1e-4,
         'beta_end': 0.02,
         'model_cls': model_cls.__name__,
-        "epochs": 20,
+        "epochs": 50,
         "n_test_samples": 1_000,
     }
 
@@ -96,14 +96,15 @@ def train():
             opt.step()
 
             pbar.set_postfix(EPOCH=epoch, MSE=loss.item())
-            wandb.log({"MSE": loss.item(), "epoch": epoch}, step=epoch * l + i)
+            wandb.log({"MSE": loss.item(), "epoch": epoch})
 
         if epoch % 2 == 0:
             test_samples, all_test_samples = diffusion.sample_scalar(model, n_samples=config['n_test_samples'])
             train_samples = dataset.data[:config['n_test_samples']]
             plt.figure()
-            plt.hist(train_samples, bins=25, color='r', alpha=0.5)
-            plt.hist(test_samples, color='b', bins=25, alpha=0.5)
+            bins = np.linspace(-1, 1, 26)
+            plt.hist(train_samples, bins=bins, color='r', alpha=0.5)
+            plt.hist(test_samples, color='b', bins=bins, alpha=0.5)
             plt.xlim([-1, 1])
             fig_name = "samples_hist"
             wandb_save_fig(fig_name, results_dir)
