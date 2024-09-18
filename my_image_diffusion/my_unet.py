@@ -161,69 +161,12 @@ class LinearWithPosEmb(nn.Module):
         return a + emb
 
 
-class MyToyMLP(nn.Module):
-
-    def __init__(self, emb_dim=256, device='cpu'):
-        super().__init__()
-        self.emb_dim = emb_dim
-        self.device = device
-
-        self.l1 = LinearWithPosEmb(1, 64, emb_dim)
-        self.a1 = nn.Tanh()
-        self.l2 = LinearWithPosEmb(64, 256, emb_dim)
-        self.a2 = nn.Tanh()
-        self.l3 = LinearWithPosEmb(256, 256, emb_dim)
-        self.a3 = nn.Tanh()
-        self.l4 = LinearWithPosEmb(256, 64, emb_dim)
-        self.a4 = nn.Tanh()
-        self.l4 = LinearWithPosEmb(64, 1, emb_dim)
-
-    def pos_encoding(self, t, pos_embed_dim=64):
-        freq = 10_000 ** (torch.arange(0, pos_embed_dim, 2, device=self.device).float() / pos_embed_dim)
-        inv_freq = 1 / freq
-        pos_enc_a = torch.sin(t.repeat(1, pos_embed_dim // 2) * inv_freq)
-        pos_enc_b = torch.cos(t.repeat(1, pos_embed_dim // 2) * inv_freq)
-        pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
-
-        return pos_enc
-
-    def forward(self, x, t):
-        t = t.unsqueeze(-1).type(torch.float)
-        pos_emb = self.pos_encoding(t, self.emb_dim)
-
-        h1 = self.l1(x, pos_emb)
-        z1 = self.a1(h1)
-        h2 = self.l2(z1, pos_emb)
-        z2 = self.a2(h2)
-        h3 = self.l3(z2, pos_emb)
-        z3 = self.a3(h3)
-        pred_noise = self.l4(z3, pos_emb)
-
-        # if self.training:
-        #     plt.figure()
-        #     plt.title("pred noise in MyToyMLP when training")
-        #     plt.hist(pred_noise.squeeze().detach().numpy(), color='r', bins=50)
-        #     plt.xlim([-2, 2])
-        #     plt.ylim([0, 100])
-        #     plt.show()
-        return pred_noise
-
-
 class SinusoidalTimeEmbedding(nn.Module):
 
     def __init__(self, embedding_dim, device):
         super().__init__()
         self.emb_dim = embedding_dim
         self.device = device
-
-    # def forward(self, t):
-    #     freq = 10_000 ** (torch.arange(0, self.emb_dim, 2, device=self.device).float() / self.emb_dim)
-    #     inv_freq = 1 / freq
-    #     t.repeat(1, self.emb_dim // 2) * inv_freq
-    #     pos_enc_a = torch.sin(t.repeat(1, self.emb_dim // 2) * inv_freq)
-    #     pos_enc_b = torch.cos(t.repeat(1, self.emb_dim // 2) * inv_freq)
-    #     pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
-    #     return pos_enc
 
     def forward(self, t):
         # t is expected to be a Long tensor of shape [batch_size]
@@ -233,34 +176,6 @@ class SinusoidalTimeEmbedding(nn.Module):
         emb = t.unsqueeze(1) * emb.unsqueeze(0)
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
         return emb  # Shape: [batch_size, embedding_dim]
-
-
-class MyToyMLP2(nn.Module):
-    def __init__(self, device='cpu'):
-        super().__init__()
-        self.device = device
-
-        # Embedding for the time step t
-        self.time_embed = SinusoidalTimeEmbedding(64, device=device)  # Embedding dim for time steps
-
-        # Main MLP for diffusion
-        self.mlp = nn.Sequential(
-            nn.Linear(1 + 64, 128),  # Input is scalar x and time embedding
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)  # Output is scalar prediction
-        )
-
-    def forward(self, x, t):
-        t_embed = self.time_embed(t)
-
-        x_t = torch.cat([x, t_embed], dim=-1)
-
-        out = self.mlp(x_t)
-        return out
 
 
 class UNet(nn.Module):
@@ -338,14 +253,15 @@ class UNet(nn.Module):
 
 
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, dim, num_heads=4):
-        super(SelfAttentionBlock, self).__init__()
-        self.attention = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads)
-        self.layernorm = nn.LayerNorm(dim)
+    def __init__(self, h2, h3, num_heads=4, use_layer_norm=True):
+        super().__init__()
+        self.use_layer_norm = use_layer_norm
+        self.attention = nn.MultiheadAttention(embed_dim=h2, num_heads=num_heads)
+        self.layer_norm = nn.LayerNorm(h2)
         self.ff = nn.Sequential(
-            nn.Linear(dim, dim * 4),
+            nn.Linear(h2, h3),
             nn.ReLU(),
-            nn.Linear(dim * 4, dim)
+            nn.Linear(h3, h2)
         )
 
     def forward(self, x):
@@ -354,12 +270,16 @@ class SelfAttentionBlock(nn.Module):
         # We will pass just the embedding features
         x = x.unsqueeze(0)  # Add a fake sequence length dimension
         attn_output, _ = self.attention(x, x, x)
-        x = self.layernorm(x + attn_output)
-        x = self.layernorm(x + self.ff(x))
+        if self.use_layer_norm:
+            x = self.layer_norm(x + attn_output)
+            x = self.layer_norm(x + self.ff(x))
+        else:
+            x = x + attn_output
+            x = x + self.ff(x)
         return x.squeeze(0)  # Remove the fake sequence length dimension
 
 
-class DiffusionModelWithAttention(nn.Module):
+class DiffusionModel(nn.Module):
     def __init__(self, device='cpu'):
         super().__init__()
 
@@ -378,7 +298,32 @@ class DiffusionModelWithAttention(nn.Module):
             nn.Linear(h1, h2)
         )
 
-        self.attention = SelfAttentionBlock(dim=h2, num_heads=4)
+        self.final_layer = nn.Linear(h2, 1)
+
+    def forward(self, x, t):
+        t_embed = self.time_embed(t)
+        x_t = torch.cat([x, t_embed], dim=-1)
+        x = self.mlp(x_t)
+        return self.final_layer(x)
+
+
+class DiffusionModelWithAttention(nn.Module):
+    def __init__(self, h1=128, h2=128, h3=512, time_emb_dim=64, use_layer_norm=True, device='cpu'):
+        super().__init__()
+
+        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, device=device)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(1 + time_emb_dim, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h1),
+            nn.ReLU(),
+            nn.Linear(h1, h2)
+        )
+
+        self.attention = SelfAttentionBlock(h2=h2, h3=h3, num_heads=4, use_layer_norm=use_layer_norm)
 
         self.final_layer = nn.Linear(h2, 1)
 

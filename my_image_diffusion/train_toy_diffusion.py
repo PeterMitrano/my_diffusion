@@ -11,8 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from my_image_diffusion.ddpm import Diffusion
-from my_image_diffusion.models_v1 import DiffusionModelWithResNet
-from my_image_diffusion.my_unet import MyToyMLP, MyToyMLP2, UNet, DiffusionModelWithAttention
+from my_image_diffusion.my_unet import DiffusionModelWithAttention
 from my_image_diffusion.utils import ToyDataset
 
 
@@ -27,7 +26,7 @@ def train():
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
 
-    model_cls = DiffusionModelWithResNet
+    model_cls = DiffusionModelWithAttention
     config = {
         'lr': 1e-5,
         'batch_size': 128,
@@ -35,19 +34,21 @@ def train():
         'beta_start': 1e-4,
         'beta_end': 0.02,
         'model_cls': model_cls.__name__,
-        "epochs": 50,
+        "epochs": 30,
         "n_test_samples": 1_000,
+        "model_kwargs": {
+            "h1": 128,
+            "h2": 128,
+            "h3": 512,
+            "use_layer_norm": True,
+            "time_emb_dim": 128,
+        }
     }
 
     dataset = ToyDataset(dataset_path)
     dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True)
 
-    # model = MyToyMLP()
-    # model = MyToyMLP2()
-    # model = DiffusionModelWithAttention()
-    # model = DiffusionModelWithResNet()
-    # model = UNet(c_in=1, c_out=1)
-    model = model_cls()
+    model = model_cls(config['model_kwargs'])
 
     opt = optim.AdamW(model.parameters(), lr=config['lr'])
     mse = nn.MSELoss()
