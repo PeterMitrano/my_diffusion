@@ -1,18 +1,32 @@
 from pathlib import Path
-from scipy.stats import chisquare, power_divergence
+from scipy.stats import chisquare
 import numpy as np
 import matplotlib.pyplot as plt
 
 import torch
 import wandb
-from PIL import Image
 from torch import optim, nn
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+import tqdm
 
 from my_image_diffusion.ddpm import Diffusion
-from my_image_diffusion.my_unet import DiffusionModelWithAttention
+from my_image_diffusion.models2 import count_model_params
+from my_image_diffusion.models import DiffusionModel
 from my_image_diffusion.utils import ToyDataset
+
+
+def step_epoch_generator(dataloader, steps: int):
+    iterator = iter(dataloader)
+    epoch = 0
+    for step in tqdm.trange(steps):
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            iterator = iter(dataloader)
+            epoch += 1
+            batch = next(iterator)
+        yield step, epoch, batch
+
 
 
 def train():
@@ -26,43 +40,52 @@ def train():
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
 
-    model_cls = DiffusionModelWithAttention
+    d_config = {
+        "cls": DiffusionModel,
+        "model_kwargs": {
+            "h1": 512,
+            "h2": 512,
+            "h3": 512,
+            "time_emb_dim": 8,
+            "time_emb_mode": 'learned',
+        }
+    }
     config = {
-        'lr': 1e-5,
+        'lr': 1e-3,
         'batch_size': 128,
         'noise_steps': 45,
         'beta_start': 1e-4,
         'beta_end': 0.02,
-        'model_cls': model_cls.__name__,
-        "epochs": 30,
-        "n_test_samples": 1_000,
-        "model_kwargs": {
-            "h1": 128,
-            "h2": 128,
-            "h3": 512,
-            "use_layer_norm": True,
-            "time_emb_dim": 128,
-        }
+        "steps": 2_000,
+        "n_test_samples": 1_500,
+        "model": d_config,
     }
 
     dataset = ToyDataset(dataset_path)
     dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True)
 
-    model = model_cls(config['model_kwargs'])
+    model = config['model']['cls'](**config['model']['model_kwargs'])
 
     opt = optim.AdamW(model.parameters(), lr=config['lr'])
     mse = nn.MSELoss()
-    l = len(dataloader)
+
+    # use linear LR decay from the initial LR to 0
+    lr_scheduler = optim.lr_scheduler.LinearLR(opt, start_factor=1, end_factor=0, total_iters=config['steps'])
 
     wandb.init(project="my_diffusion")
     wandb.config.update(config)
+    wandb.config["model_size"] = count_model_params(model)
+    wandb.log({"model_size": count_model_params(model)})
+
+    trial_dir = results_dir / wandb.run.name
+    trial_dir.mkdir(exist_ok=True)
 
     plt.figure()
     plt.title("Training Data Histogram")
     plt.hist(dataset.data, bins=25, color='r')
     plt.xlim([-1, 1])
     fig_name = "toy_data_hist"
-    wandb_save_fig(fig_name, results_dir)
+    wandb_save_fig(fig_name, trial_dir)
 
     diffusion = Diffusion(shape=(1,), noise_steps=config['noise_steps'], beta_start=config['beta_start'],
                           beta_end=config['beta_end'])
@@ -73,33 +96,42 @@ def train():
         plt.plot(x_i, alpha=0.05, c='k')
     plt.title("Forward diffusion process")
     fig_name = "fwd_diffusion"
-    wandb_save_fig(fig_name, results_dir)
+    wandb_save_fig(fig_name, trial_dir)
 
     plt.figure()
     plt.title("fwd distribution final")
     plt.hist(fwd_viz_samples[-1], bins=25)
     plt.xlim([-1, 1])
     fig_name = "fwd_distribution_final"
-    wandb_save_fig(fig_name, results_dir)
+    wandb_save_fig(fig_name, trial_dir)
 
-    for epoch in range(config['epochs']):
-        pbar = tqdm(dataloader)
-        for i, images in enumerate(pbar):
-            t = diffusion.sample_timestamps(config['batch_size'])
+    # visualize the time embedding
+    ts = torch.arange(0, config['noise_steps'])[:, None]
+    time_emb_out = model.time_embed(ts)
 
-            x_t, noise = diffusion.noise_scalar(images, t)
+    plt.figure()
+    plt.imshow(time_emb_out.detach().squeeze().numpy().T, aspect='auto')
+    plt.title("Time Embedding")
+    plt.xlabel("Time Step")
+    plt.ylabel("Embedding")
+    wandb_save_fig("time_embedding", trial_dir)
 
-            predicted_noise = model(x_t, t)
-            loss = mse(predicted_noise, noise)
+    for step, epoch, batch in step_epoch_generator(dataloader, config['steps']):
+        t = diffusion.sample_timestamps(config['batch_size'])
 
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+        x_t, noise = diffusion.noise_scalar(batch, t)
 
-            pbar.set_postfix(EPOCH=epoch, MSE=loss.item())
-            wandb.log({"MSE": loss.item(), "epoch": epoch})
+        predicted_noise = model(x_t, t)
+        loss = mse(predicted_noise, noise)
 
-        if epoch % 2 == 0:
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        lr_scheduler.step()
+
+        wandb.log({"MSE": loss.item(), "epoch": epoch, 'lr': opt.param_groups[0]['lr']})
+
+        if step % 100 == 0:
             test_samples, all_test_samples = diffusion.sample_scalar(model, n_samples=config['n_test_samples'])
             train_samples = dataset.data[:config['n_test_samples']]
             plt.figure()
@@ -108,7 +140,7 @@ def train():
             plt.hist(test_samples, color='b', bins=bins, alpha=0.5)
             plt.xlim([-1, 1])
             fig_name = "samples_hist"
-            wandb_save_fig(fig_name, results_dir)
+            wandb_save_fig(fig_name, trial_dir)
 
             # compute chi-squared distance between the two histograms and log it
             train_counts, bins = np.histogram(train_samples)
@@ -128,11 +160,10 @@ def train():
             for sample in all_test_samples.T:
                 plt.plot(sample, alpha=0.05, c='k')
             fig_name = "sampling_process"
-            wandb_save_fig(fig_name, results_dir)
+            wandb_save_fig(fig_name, trial_dir)
 
-
-def wandb_save_fig(fig_name, results_dir):
-    fig_path = results_dir / f"{fig_name}.png"
+def wandb_save_fig(fig_name, trial_dir):
+    fig_path = trial_dir / f"{fig_name}.png"
     plt.savefig(fig_path)
     plt.close()
     wandb.log({fig_name: wandb.Image(str(fig_path))})

@@ -7,7 +7,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from my_image_diffusion.ddpm import Diffusion
-from my_image_diffusion.my_unet import UNet, EMA
+from my_image_diffusion.models import UNet, EMA
 from my_image_diffusion.utils import get_images_dataloader, save_images, find_latest_checkpoint
 
 

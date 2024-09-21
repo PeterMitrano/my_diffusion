@@ -169,13 +169,10 @@ class SinusoidalTimeEmbedding(nn.Module):
         self.device = device
 
     def forward(self, t):
-        # t is expected to be a Long tensor of shape [batch_size]
-        half_dim = self.emb_dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=t.device) * -emb)
+        emb = torch.exp(-torch.arange(self.emb_dim, dtype=torch.float32, device=t.device))
         emb = t.unsqueeze(1) * emb.unsqueeze(0)
-        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=-1)
-        return emb  # Shape: [batch_size, embedding_dim]
+        emb = torch.sin(emb)
+        return emb
 
 
 class UNet(nn.Module):
@@ -279,57 +276,66 @@ class SelfAttentionBlock(nn.Module):
         return x.squeeze(0)  # Remove the fake sequence length dimension
 
 
+class TimeEmbConverter(nn.Module):
+    """ Just convert long to float and add a dimension on the end """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x.unsqueeze(-1).float()
+
+class LinearTimeEmbedding(nn.Module):
+    """ Just a linear layer but it converts long to float """
+
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.cvt = TimeEmbConverter()
+        self.linear = nn.Linear(in_dim, out_dim)
+
+    def forward(self, x):
+        x = self.cvt(x)
+        return self.linear(x)
+
+
 class DiffusionModel(nn.Module):
-    def __init__(self, device='cpu'):
+    def __init__(self, h1=128, h2=128, h3=128, time_emb_dim=64, time_emb_mode='sin', device='cpu'):
         super().__init__()
+        self.time_emb_mode = time_emb_mode
 
-        h1 = 128
-        h2 = 128
-        time_emb_dim = 64
-        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, device=device)
+        match time_emb_mode:
+            case 'sin':
+                self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, device=device)
+            case 'linear':
+                self.time_embed = LinearTimeEmbedding(1, time_emb_dim)
+            case 'learned':
+                self.time_embed = nn.Embedding(100, time_emb_dim)
+            case 'mlp':
+                self.time_embed = nn.Sequential(
+                    TimeEmbConverter(),
+                    nn.Linear(1, h1),
+                    nn.ReLU(),
+                    nn.Linear(h1, h2),
+                    nn.ReLU(),
+                    nn.Linear(h2, time_emb_dim)
+                )
+            case _:
+                raise ValueError(f"Invalid time embedding mode: {time_emb_mode}")
 
         self.mlp = nn.Sequential(
             nn.Linear(1 + time_emb_dim, h1),
             nn.ReLU(),
-            nn.Linear(h1, h1),
+            nn.Linear(h1, h2),
             nn.ReLU(),
-            nn.Linear(h1, h1),
+            nn.Linear(h2, h3),
             nn.ReLU(),
-            nn.Linear(h1, h2)
+            nn.Linear(h3, 1)
         )
-
-        self.final_layer = nn.Linear(h2, 1)
 
     def forward(self, x, t):
         t_embed = self.time_embed(t)
         x_t = torch.cat([x, t_embed], dim=-1)
-        x = self.mlp(x_t)
-        return self.final_layer(x)
+        out = self.mlp(x_t)
+        return out
 
 
-class DiffusionModelWithAttention(nn.Module):
-    def __init__(self, h1=128, h2=128, h3=512, time_emb_dim=64, use_layer_norm=True, device='cpu'):
-        super().__init__()
-
-        self.time_embed = SinusoidalTimeEmbedding(time_emb_dim, device=device)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(1 + time_emb_dim, h1),
-            nn.ReLU(),
-            nn.Linear(h1, h1),
-            nn.ReLU(),
-            nn.Linear(h1, h1),
-            nn.ReLU(),
-            nn.Linear(h1, h2)
-        )
-
-        self.attention = SelfAttentionBlock(h2=h2, h3=h3, num_heads=4, use_layer_norm=use_layer_norm)
-
-        self.final_layer = nn.Linear(h2, 1)
-
-    def forward(self, x, t):
-        t_embed = self.time_embed(t)
-        x_t = torch.cat([x, t_embed], dim=-1)
-        x = self.mlp(x_t)
-        x = self.attention(x)
-        return self.final_layer(x)

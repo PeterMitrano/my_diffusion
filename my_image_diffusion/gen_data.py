@@ -66,8 +66,8 @@ def main():
 
 def gen_1d_examples(n_samples, root):
     # counts = np.array([0, 1, 2, 4, 8, 10, 16, 8, 4, 2, 0, 0, 0, 0, 0, 1, 20, 26, 45, 30, 20, 10, 2, 0, 0, 0])
-    # counts = np.array([1, 1, 1, 1, 100, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 1, 1, 1])
-    counts = np.array([100, 50, 25, 12, 6, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    counts = np.array([1, 1, 1, 1, 100, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 100, 1, 1, 1, 1])
+    # counts = np.array([100, 50, 25, 12, 6, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
     # define a distribution using the counts, then sample from it n_samples
     rng = np.random.RandomState(0)
     xmin = -1

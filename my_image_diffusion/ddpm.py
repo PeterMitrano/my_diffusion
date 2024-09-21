@@ -1,6 +1,4 @@
 import numpy as np
-import rerun as rr
-import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 
@@ -87,7 +85,7 @@ class Diffusion:
         all_samples = []
         with torch.no_grad():
             x = torch.randn((n_samples,) + self.shape).to(self.device)
-            for i in tqdm(reversed(range(0, self.noise_steps)), total=self.noise_steps):
+            for i in reversed(range(0, self.noise_steps)):
                 t = (torch.ones(n_samples) * i).long().to(self.device)
                 predicted_noise = model(x, t)
                 all_samples.append(x.detach().numpy())
@@ -99,7 +97,9 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                x = 1 / torch.sqrt(alpha) * (
+                            x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(
+                    beta) * noise
         model.train()
         all_samples = np.squeeze(np.array(all_samples))
         x = np.squeeze(x.numpy())
@@ -120,7 +120,9 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                x = 1 / torch.sqrt(alpha) * (
+                            x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(
+                    beta) * noise
         model.train()
         x = x * 255
         x = torch.clamp(x, 0, 255)
