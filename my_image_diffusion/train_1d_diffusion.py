@@ -7,26 +7,11 @@ import torch
 import wandb
 from torch import optim, nn
 from torch.utils.data import DataLoader
-import tqdm
 
 from my_image_diffusion.ddpm import Diffusion
 from my_image_diffusion.models2 import count_model_params
 from my_image_diffusion.models import DiffusionModel
-from my_image_diffusion.utils import ToyDataset
-
-
-def step_epoch_generator(dataloader, steps: int):
-    iterator = iter(dataloader)
-    epoch = 0
-    for step in tqdm.trange(steps):
-        try:
-            batch = next(iterator)
-        except StopIteration:
-            iterator = iter(dataloader)
-            epoch += 1
-            batch = next(iterator)
-        yield step, epoch, batch
-
+from my_image_diffusion.utils import Toy1dDataset, step_epoch_generator, wandb_save_fig
 
 
 def train():
@@ -43,25 +28,25 @@ def train():
     d_config = {
         "cls": DiffusionModel,
         "model_kwargs": {
-            "h1": 512,
-            "h2": 512,
-            "h3": 512,
+            "h1": 16,
+            "h2": 16,
+            "h3": 16,
             "time_emb_dim": 8,
-            "time_emb_mode": 'learned',
+            "time_emb_mode": None,
         }
     }
     config = {
         'lr': 1e-3,
         'batch_size': 128,
-        'noise_steps': 45,
+        'noise_steps': 20,
         'beta_start': 1e-4,
         'beta_end': 0.02,
-        "steps": 2_000,
+        "steps": 20_000,
         "n_test_samples": 1_500,
         "model": d_config,
     }
 
-    dataset = ToyDataset(dataset_path)
+    dataset = Toy1dDataset(dataset_path)
     dataloader = DataLoader(dataset, batch_size=config['batch_size'], shuffle=True)
 
     model = config['model']['cls'](**config['model']['model_kwargs'])
@@ -110,7 +95,7 @@ def train():
     time_emb_out = model.time_embed(ts)
 
     plt.figure()
-    plt.imshow(time_emb_out.detach().squeeze().numpy().T, aspect='auto')
+    plt.imshow(np.atleast_2d(time_emb_out.detach().squeeze().numpy()).T, aspect='auto')
     plt.title("Time Embedding")
     plt.xlabel("Time Step")
     plt.ylabel("Embedding")
@@ -123,6 +108,12 @@ def train():
 
         predicted_noise = model(x_t, t)
         loss = mse(predicted_noise, noise)
+
+        # add L1 parameter loss to encourage sparsity
+        l1_loss = torch.tensor(0.0)
+        for param in model.parameters():
+            l1_loss += torch.norm(param, 1) * 1e-4
+        loss += l1_loss
 
         opt.zero_grad()
         loss.backward()
@@ -162,11 +153,10 @@ def train():
             fig_name = "sampling_process"
             wandb_save_fig(fig_name, trial_dir)
 
-def wandb_save_fig(fig_name, trial_dir):
-    fig_path = trial_dir / f"{fig_name}.png"
-    plt.savefig(fig_path)
-    plt.close()
-    wandb.log({fig_name: wandb.Image(str(fig_path))})
+    # Save the model
+    model.config = config
+    model_ckpt_path = trial_dir / 'model.pt'
+    torch.save(model, model_ckpt_path)
 
 
 if __name__ == '__main__':

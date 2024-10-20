@@ -5,18 +5,18 @@ import numpy as np
 from scipy.stats import gaussian_kde
 
 
-def make_traj(start, goal, obstacle, rng, lim):
+def make_traj(start, goal, obstacle, rng, lower, upper):
     n = 100
     step_size = 0.01
     step_noise = 0.01
     size = 35
     goal_potential = -5
-    # simulate a dynamical system starting at the point (-1, -1) and moving towards (1, 1)
-    # Let there be an obstacle at (0, 0), and it should avoid the obstacle.
+    # Simulate a dynamical system starting at start and ending at goal
+    # It should avoid the obstacle.
     # we'll use a global potential field to simulate this
     # potential field using meshgrid
-    x = np.linspace(0, lim, size)
-    y = np.linspace(0, lim, size)
+    x = np.linspace(lower, upper, size)
+    y = np.linspace(lower, upper, size)
     X, Y = np.meshgrid(x, y)
     xy_field = np.stack([X, Y], axis=-1)
     obs_potential_field = -np.clip(1 / np.linalg.norm(xy_field - obstacle, axis=-1), 0, 10)
@@ -48,20 +48,6 @@ def get_gradient(current_pos, goal, goal_potential, obstacle):
     current_obstacle_grad = 1.8 * (current_pos - obstacle) / np.linalg.norm(current_pos - obstacle) ** 1.3
     current_grad = current_goal_grad + current_obstacle_grad
     return current_grad
-
-
-def main():
-    start = np.array([0.1, 0.1])
-    obstacle = np.array([1, 1])
-    lim = 2
-
-    root = Path("data/trajs")
-    root.mkdir(exist_ok=True, parents=True)
-
-    n_samples = 1024 * 32
-    gen_1d_examples(n_samples, root)
-    # gen_traj_images(start, obstacle, lim, n_samples, root)
-    # gen_traj_npy(start, obstacle, lim, n_samples)
 
 
 def gen_1d_examples(n_samples, root):
@@ -98,17 +84,16 @@ def gen_1d_examples(n_samples, root):
     np.save(root / "1d.npy", samples)
 
 
-def gen_trajs(start, obstacle, lim, n_samples):
+def gen_trajs(start, obstacle, goal, lim, n_samples):
     for i in range(n_samples):
         rng = np.random.RandomState(i)
-        goal = rng.rand(2) * 0.1 + 1.75
-        traj, potential_field = make_traj(start, goal, obstacle, rng, lim)
+        traj, potential_field = make_traj(start, goal, obstacle, rng, *lim)
 
         yield i, traj, goal, potential_field
 
 
-def gen_traj_images(start, obstacle, lim, n_samples, root):
-    for i, traj, goal, potential_field in gen_trajs(start, obstacle, lim, n_samples):
+def gen_traj_images(start, obstacle, lim, n_samples, root, goal_p=1.25):
+    for i, traj, goal, potential_field in gen_trajs(start, obstacle, lim, n_samples, goal_p):
         plt.figure()
         plt.plot(traj[:, 0], traj[:, 1], color='k')
         plt.scatter(obstacle[0], obstacle[1], color='red', s=100)
@@ -121,22 +106,34 @@ def gen_traj_images(start, obstacle, lim, n_samples, root):
         plt.savefig(root / f"traj_{i}.png")
 
 
-def gen_traj_npy(start, obstacle, lim, n_samples, root):
+def gen_traj_npy(start, obstacle, goal, lim, n_samples, root, time=50):
     trajs_dataset = []
-    for i, traj, goal, potential_field in gen_trajs(start, obstacle, lim, n_samples):
+    for i, traj, goal, potential_field in gen_trajs(start, obstacle, goal, lim, n_samples):
         # downsample to a fixed length
-        time = 50
         i = np.linspace(0, len(traj) - 1, time)
         l = np.floor(i).astype(int)
         l = np.clip(l, 0, len(traj) - 2)
         alpha = (i - l)[:, None]
         traj_interp = (1 - alpha) * traj[l] + alpha * traj[l + 1]
 
-        plt.figure()
-        plt.plot(traj[:, 0], traj[:, 1], color='k')
-        plt.show()
         trajs_dataset.append(traj_interp)
+
+    plt.figure()
+    plt.scatter(obstacle[0], obstacle[1], s=500)
+    for traj in trajs_dataset:
+        plt.plot(traj[:, 0], traj[:, 1], color='k')
+    plt.xlim(lim[0], lim[1])
+    plt.ylim(lim[0], lim[1])
+    plt.show()
     np.save(root / f"trajs.npy", trajs_dataset)
+
+
+def main():
+    root = Path("data/trajs")
+    root.mkdir(exist_ok=True, parents=True)
+    # gen_1d_examples(n_samples=1024 * 32, root=root)
+    # gen_traj_images(start, obstacle, (0, 1) n_samples, root)
+    gen_traj_npy(start=np.array([-1.2, -1.2]), obstacle=np.array([0, 0]), goal=np.array([1.25, 1.25]), lim=(-2, 2), n_samples=256*32, root=root)
 
 
 if __name__ == '__main__':
